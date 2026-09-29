@@ -3196,6 +3196,24 @@ async function wbGenRun() {
   $('#wb-gen-dl').disabled = false; $('#wb-gen-clr').disabled = false;
 }
 /* ---- 缝合 ---- */
+const WB_ZONES = [
+  { k: 'system', name: '系统声明', kw: ['系统','协议','规则','指令','机制','流程','命令','说明','警告','注意','提示','运行','声明','变量','设置','format','prefill'] },
+  { k: 'worldview', name: '世界观', kw: ['世界观','世界','大陆','王朝','时代','江湖','设定','背景','势力','地图','城市','历史','传说','宗门','帝国','山海','地域','活化'] },
+  { k: 'persona', name: '人设', kw: ['人设','角色','人物','性格','言行','相处','关系','伙伴','npc','主角','配角','user','char','禁止编造','口癖','身份'] },
+  { k: 'style', name: '文风', kw: ['文风','文笔','风格','叙事','描写','口吻','语言','行文','笔触','氛围','画面','修辞','节奏','文感','美学','张力','电影','中文思维','说人话','禁词','审查','叙述','写作','指导'] },
+  { k: 'plot', name: '剧情', kw: ['剧情','主线','事件','任务','故事','冲突','转折','线索','进展','副本','章节','行动','推进','速度'] },
+  { k: 'nsfw', name: '性爱', kw: ['性爱','床笫','nsfw','身体','敏感','爱抚','交合','体液','色情','做爱','情欲','欲望','成人','亲密','房中'] },
+];
+function wbZoneOf(text) {
+  const t = String(text || '').toLowerCase();
+  let best = 'other', bestN = 0;
+  for (const z of WB_ZONES) {
+    let n = 0;
+    for (const k of z.kw) if (t.includes(k)) n++;
+    if (n > bestN) { best = z.k; bestN = n; }
+  }
+  return best;
+}
 function wbPresetAutoInsertIdx(prompts, p) {
   let best = -1;
   for (let i = prompts.length - 1; i >= 0; i--) {
@@ -3203,6 +3221,88 @@ function wbPresetAutoInsertIdx(prompts, p) {
     if (String(q.role) === String(p.role) && String(q.injection_position) === String(p.injection_position) && String(q.injection_depth) === String(p.injection_depth)) { best = i; break; }
   }
   return best >= 0 ? best + 1 : prompts.length;
+}
+function wbBigrams(t) {
+  const s = String(t || '').toLowerCase();
+  const out = new Set();
+  for (let i = 0; i < s.length - 1; i++) {
+    const c0 = s[i], c1 = s[i + 1];
+    if (c0 >= '一' && c0 <= '龥' && c1 >= '一' && c1 <= '龥') out.add(c0 + c1);
+  }
+  return out;
+}
+function wbSim(a, b) {
+  const A = wbBigrams(a), B = wbBigrams(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  A.forEach(x => { if (B.has(x)) inter++; });
+  return inter / Math.max(1, Math.min(A.size, B.size));
+}
+function wbPresetAutoInsert(dst, np) {
+  // 自适应：先按 prompt_order 注入顺序扫目标条目，找与来源「内容最相似」的锚点（同用途优先）
+  const orderArr = (Array.isArray(dst.prompt_order) && dst.prompt_order[0] && Array.isArray(dst.prompt_order[0].order)) ? dst.prompt_order[0].order : null;
+  const srcText = np.name + ' ' + np.content;
+  const zone = wbZoneOf(srcText);
+  if (orderArr && orderArr.length) {
+    const idMap = {};
+    dst.prompts.forEach(q => { idMap[q.identifier] = q; });
+    let sameZoneBest = -1, sameZoneSim = 0, crossZoneBest = -1, crossZoneSim = 0.06, zoneCount = 0, lastZonePos = -1;
+    for (let i = 0; i < orderArr.length; i++) {
+      const q = idMap[orderArr[i].identifier];
+      if (!q) continue;
+      const z = wbZoneOf(q.name + ' ' + q.content);
+      const sim = wbSim(srcText, q.name + ' ' + q.content);
+      if (z === zone) {
+        zoneCount++; lastZonePos = i;
+        if (sim >= 0.06 && sim > sameZoneSim) { sameZoneBest = i; sameZoneSim = sim; }
+      } else if (sim >= 0.06 && sim > crossZoneSim) { crossZoneBest = i; crossZoneSim = sim; }
+    }
+    // 优先级：同用途区内的相似锚点 > 同用途区末尾 > 跨区相似 > 回退
+    if (sameZoneBest >= 0) {
+      const anchorId = orderArr[sameZoneBest].identifier;
+      const ai = dst.prompts.findIndex(q => q.identifier === anchorId);
+      return { idx: ai >= 0 ? ai + 1 : dst.prompts.length, anchorId: anchorId, zone: zone, zoneCount: zoneCount, matched: true, bySim: true };
+    }
+    if (lastZonePos >= 0) {
+      const anchorId = orderArr[lastZonePos].identifier;
+      const ai = dst.prompts.findIndex(q => q.identifier === anchorId);
+      return { idx: ai >= 0 ? ai + 1 : dst.prompts.length, anchorId: anchorId, zone: zone, zoneCount: zoneCount, matched: true, bySim: false };
+    }
+    if (crossZoneBest >= 0) {
+      const anchorId = orderArr[crossZoneBest].identifier;
+      const ai = dst.prompts.findIndex(q => q.identifier === anchorId);
+      return { idx: ai >= 0 ? ai + 1 : dst.prompts.length, anchorId: anchorId, zone: zone, zoneCount: 0, matched: true, bySim: true, crossZone: true };
+    }
+  }
+  let sameGroup = -1;
+  for (let i = dst.prompts.length - 1; i >= 0; i--) {
+    const q = dst.prompts[i];
+    if (String(q.role) === String(np.role) && String(q.injection_position) === String(np.injection_position) && String(q.injection_depth) === String(np.injection_depth)) { sameGroup = i; break; }
+  }
+  if (sameGroup >= 0) {
+    const anchorId = dst.prompts[sameGroup].identifier;
+    return { idx: sameGroup + 1, anchorId: anchorId, zone: zone, zoneCount: 0, matched: false, newZone: false, byGroup: true };
+  }
+  // 5) 同角色区末尾（忽略注入位置差异，保持酒馆按角色排序的结构）
+  let sameRoleLast = -1;
+  for (let i = dst.prompts.length - 1; i >= 0; i--) {
+    if (String(dst.prompts[i].role) === String(np.role)) { sameRoleLast = i; break; }
+  }
+  if (sameRoleLast >= 0) {
+    const anchorId = dst.prompts[sameRoleLast].identifier;
+    return { idx: sameRoleLast + 1, anchorId: anchorId, zone: zone, zoneCount: 0, matched: false, newZone: false, byRole: true };
+  }
+  // 6) 同注入方式区末尾（injection_position 相同，注入语义一致）
+  let samePosLast = -1;
+  for (let i = dst.prompts.length - 1; i >= 0; i--) {
+    if (String(dst.prompts[i].injection_position) === String(np.injection_position)) { samePosLast = i; break; }
+  }
+  if (samePosLast >= 0) {
+    const anchorId = dst.prompts[samePosLast].identifier;
+    return { idx: samePosLast + 1, anchorId: anchorId, zone: zone, zoneCount: 0, matched: false, newZone: false, byPos: true };
+  }
+  // 7) 完全无关联 → 末尾新建独立分区块
+  return { idx: dst.prompts.length, anchorId: null, zone: zone, zoneCount: 0, matched: false, newZone: true };
 }
 function wbPlan() {
   if (!wbSrc || !wbDst) { toast('请先导入来源与目标文件', 'warn'); return null; }
@@ -3219,28 +3319,58 @@ function wbPlan() {
   }
   const plan = [];
   if (wbSrc.kind === 'preset') {
-    const sim = wbDst.prompts.slice();
+    const sim = { prompts: wbDst.prompts.slice(), prompt_order: wbDst.raw.prompt_order };
     let cursor = dstIdx + 1;
+    let prevNewZone = false, prevIdx = -1;
     sel.forEach(i => {
       const p = wbSrc.prompts[i];
-      let idx, anchor;
-      if (mode === 'manual') { idx = cursor++; anchor = sim[idx - 1]; }
-      else { idx = wbPresetAutoInsertIdx(sim, p); anchor = idx > 0 ? sim[idx - 1] : null; }
       const nm = (p.name || String(p.content || '').slice(0, 24) || '条目');
-      const an = anchor ? (anchor.name || String(anchor.content || '').slice(0, 24) || '条目') : null;
-      let to, why;
+      let to, why, anchorNm = null;
       if (mode === 'manual') {
-        to = an ? '插入到「' + an + '」之后' : '插入到文件开头';
+        const idx = cursor++;
+        const anchor = sim.prompts[idx - 1];
+        to = anchor ? '插入到「' + (anchor.name || String(anchor.content || '').slice(0, 24)) + '」之后' : '插入到文件开头';
         why = '按你手动指定的位置';
-      } else if (an) {
-        to = '插入到「' + an + '」之后';
-        why = '与「' + an + '」同属 role=' + p.role + ' / 注入区域 ' + p.injection_position + ' / 深度 ' + p.injection_depth + ' 组，同类条目放在一起，酒馆按区域顺序注入时保持一致';
+        sim.prompts.splice(idx, 0, p);
+        sim.prompt_order && sim.prompt_order.forEach(po => { if (po && Array.isArray(po.order)) po.order.splice(idx - 1 + 1, 0, { identifier: p.identifier, enabled: true }); });
       } else {
-        to = '插入到文件末尾';
-        why = '目标中没有与它同 role/区域/深度的条目，放末尾不打断现有分组';
+        let ai;
+        if (prevNewZone) ai = { idx: prevIdx + 1, anchorId: prevIdx >= 0 ? sim.prompts[prevIdx] ? sim.prompts[prevIdx].identifier : null : null, zone: wbZoneOf(p.name + ' ' + p.content), zoneCount: 0, matched: false, newZone: true };
+        else ai = wbPresetAutoInsert(sim, p);
+        const zoneName = WB_ZONES.find(z => z.k === ai.zone);
+        const anchor = ai.anchorId ? sim.prompts.find(x => x.identifier === ai.anchorId) : null;
+        anchorNm = anchor ? (anchor.name || String(anchor.content || '').slice(0, 24)) : null;
+        if (ai.matched && ai.crossZone) {
+          to = anchorNm ? '插入到「' + anchorNm + '」之后' : '插入到文件末尾';
+          why = '目标预设里没有同用途（' + (zoneName ? zoneName.name : ai.zone) + '）的条目，就按内容相似度贴到最接近的「' + anchorNm + '」附近，不强行新建区域';
+        } else if (ai.matched && ai.bySim) {
+          to = anchorNm ? '插入到「' + anchorNm + '」之后' : '插入到文件末尾';
+          why = '与「' + anchorNm + '」内容主题最接近（关键词重合度最高），在该用途区内精确落位，不打乱目标预设的结构';
+        } else if (ai.matched) {
+          to = anchorNm ? '插入到「' + anchorNm + '」之后（' + (zoneName ? zoneName.name : ai.zone) + '区）' : '插入到文件末尾';
+          why = '与「' + anchorNm + '」同属' + (zoneName ? zoneName.name : ai.zone) + '用途区（该区共 ' + ai.zoneCount + ' 条），插入该区末尾，与目标预设的分区结构一致';
+        } else if (ai.newZone) {
+          to = '文件末尾·新区块';
+          why = '目标预设里没有任何可关联的内容区域、角色分组或注入方式与之相近，只能放在文件末尾新建区块，多条无匹配条目会连续成块，不影响原有结构；想放别处请选手动模式';
+        } else if (ai.byRole) {
+          to = anchorNm ? '插入到「' + anchorNm + '」之后（同角色区）' : '插入到文件末尾';
+          why = '没有相关用途和相似内容，但按酒馆的角色分组规则（与「' + anchorNm + '」同为 ' + (np.role || '未知角色') + '）插到该区末尾，保持按角色排序的结构';
+        } else if (ai.byPos) {
+          to = anchorNm ? '插入到「' + anchorNm + '」之后（同注入方式区）' : '插入到文件末尾';
+          why = '没有相关用途和相似内容，按注入方式就近（与「' + anchorNm + '」同为 injection_position=' + (np.injection_position || '0') + '）插入，保持注入语义一致';
+        } else {
+          to = anchorNm ? '插入到「' + anchorNm + '」之后' : '插入到文件末尾';
+          why = '目标预设里没有同用途（' + (zoneName ? zoneName.name : ai.zone) + '）的条目，按同角色/注入区域规则就近插入，不强行打散现有结构';
+        }
+        sim.prompts.splice(ai.idx, 0, p);
+        if (sim.prompt_order && sim.prompt_order[0] && Array.isArray(sim.prompt_order[0].order)) {
+          const oa = ai.anchorId ? sim.prompt_order[0].order.findIndex(o => o.identifier === ai.anchorId) : -1;
+          if (oa >= 0) sim.prompt_order[0].order.splice(oa + 1, 0, { identifier: p.identifier, enabled: true });
+          else sim.prompt_order[0].order.push({ identifier: p.identifier, enabled: true });
+        }
+        prevNewZone = !!ai.newZone; prevIdx = ai.idx;
       }
       plan.push({ from: nm, to: to, why: why });
-      sim.splice(idx, 0, p);
     });
   } else {
     const cur = wbDst.entries.map(x => x);
@@ -3312,15 +3442,18 @@ function wbMergePreset(sel, mode, dstIdx) {
   const srcSel = sel.map(i => wbSrc.prompts[i]);
   const added = [];
   let cursor = dstIdx + 1;
+  let prevNewZone = false, prevIdx = -1;
   for (const p of srcSel) {
     const np = Object.assign({}, p);
     delete np.__idx;
     if (!np.identifier || dst.prompts.some(q => q.identifier === np.identifier)) np.identifier = uid();
-    let idx, anchorId;
+    let idx, anchorId, newZone = false;
     if (mode === 'manual') { idx = cursor++; anchorId = dst.prompts[idx - 1].identifier; }
-    else { idx = wbPresetAutoInsertIdx(dst.prompts, np); anchorId = idx > 0 ? dst.prompts[idx - 1].identifier : null; }
+    else if (prevNewZone) { idx = prevIdx + 1; anchorId = dst.prompts[idx - 1] ? dst.prompts[idx - 1].identifier : null; newZone = true; }
+    else { const ai = wbPresetAutoInsert(dst, np); idx = ai.idx; anchorId = ai.anchorId; newZone = !!ai.newZone; }
     dst.prompts.splice(idx, 0, np);
     added.push(np.identifier);
+    prevNewZone = newZone; prevIdx = idx;
     if (Array.isArray(dst.prompt_order)) {
       dst.prompt_order.forEach(po => {
         if (po && Array.isArray(po.order) && !po.order.some(o => o.identifier === np.identifier)) {
