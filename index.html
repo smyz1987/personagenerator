@@ -142,15 +142,36 @@ textarea.input{resize:vertical;line-height:1.5}
   #result{max-height:50vh}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* ===== 人设一览 ===== */
+.lib-card{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--SmartThemeFGColor);border-radius:10px;margin-bottom:8px;background:var(--SmartThemeBlurTintColor)}
+.lib-thumb{width:52px;height:52px;flex:0 0 52px;border-radius:8px;overflow:hidden;background:var(--SmartThemeBodyColor);display:flex;align-items:center;justify-content:center;color:var(--SmartThemeFGColor);font-size:11px}
+.lib-thumb img{width:100%;height:100%;object-fit:cover}
+.lib-info{flex:1;min-width:0}
+.lib-info b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.lib-meta{font-size:11px;color:var(--SmartThemeFGColor);margin-top:2px}
+.lib-ops{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.lib-chk input{width:16px;height:16px;cursor:pointer}
+.lib-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:flex;align-items:center;justify-content:center;padding:16px}
+.lib-detail{background:var(--SmartThemeBlurTintColor);border:1px solid var(--SmartThemeFGColor);border-radius:12px;max-width:760px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
+.lib-detail-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--SmartThemeFGColor)}
+.lib-detail-head b{flex:1;font-size:14px}
+.lib-detail-body{padding:12px 14px;overflow:auto;font-size:13px;line-height:1.7;color:var(--SmartThemeTextColor)}
+.lib-detail-body pre{white-space:pre-wrap;word-break:break-word;margin:4px 0}
+.lib-greet{border:1px solid var(--SmartThemeFGColor);border-radius:8px;margin-top:8px;overflow:hidden}
+.lib-greet summary{padding:8px 10px;cursor:pointer;font-size:12.5px;background:var(--SmartThemeChatTintColor)}
+.lib-greet .lib-greet-body{max-height:240px;overflow:auto;padding:10px;white-space:pre-wrap}
+.lib-sub{font-size:12px;color:var(--SmartThemeFGColor);margin-top:8px}
+@media (max-width:720px){.lib-card{flex-wrap:wrap}.lib-ops{width:100%;justify-content:flex-start}}
 </style>
 </head>
 <body>
 
 <header>
-  <span class="logo">人设生成器<small>v28 · user / NPC 人设卡</small></span>
+  <span class="logo">人设生成器<small>v30 · user / NPC 人设卡</small></span>
   <div class="tabs" id="tabs">
     <button class="tab on" data-view="home">生成人设</button>
     <button class="tab" data-view="wash">洗涤角色卡</button>
+    <button class="tab" data-view="lib">人设一览</button>
   </div>
   <span class="sp"></span>
   <select id="theme-switch" title="主题（莫兰迪色系）"></select>
@@ -378,6 +399,28 @@ textarea.input{resize:vertical;line-height:1.5}
         <button class="btn small" id="wz-edit-json" disabled>编辑结果 JSON</button>
         <button class="btn small" id="wz-dl-json">下载 JSON（调试用）</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 视图：人设一览（角色卡库） ===== -->
+<div class="view" id="view-lib">
+  <div class="col" id="lib-col">
+    <div class="panel">
+      <h3>人设一览 <small style="font-weight:normal;font-size:12px;color:var(--SmartThemeFGColor)">角色卡库</small></h3>
+      <p class="hint">把角色卡（PNG / JSON）存进浏览器，随时查看、下载、打包。卡片数据存在本机浏览器；换设备请用下方「导出 zip」打包带走，在另一台导入。</p>
+      <div class="row" style="margin-top:6px;flex-wrap:wrap">
+        <button class="btn small primary" id="btn-lib-import">导入角色卡（多选）</button>
+        <button class="btn small" id="btn-lib-importzip">导入 zip 包</button>
+        <button class="btn small" id="btn-lib-export">导出全部为 zip</button>
+        <button class="btn small" id="btn-lib-exportsel">导出选中为 zip</button>
+        <input type="file" id="lib-file" multiple accept=".png,.json,image/png,application/json" style="display:none">
+        <input type="file" id="lib-zip" accept=".zip,application/zip" style="display:none">
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row" style="align-items:center"><b>卡片列表</b><span id="lib-count" style="font-size:12px;color:var(--SmartThemeFGColor)"></span></div>
+      <div id="lib-list"></div>
     </div>
   </div>
 </div>
@@ -2616,6 +2659,255 @@ $('#wz-doubao').addEventListener('click', () => {
   });
 });
 
+/* ===== 人设一览：角色卡库（IndexedDB + zip） ===== */
+const LIB_DB = 'pc_lib_v1', LIB_STORE = 'cards';
+function libOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(LIB_DB, 1);
+    r.onupgradeneeded = () => { try { r.result.createObjectStore(LIB_STORE, { keyPath: 'id' }); } catch (e) {} };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error || new Error('IndexedDB 打不开'));
+  });
+}
+async function libAdd(recs) {
+  const db = await libOpen();
+  const tx = db.transaction(LIB_STORE, 'readwrite');
+  recs.forEach(x => tx.objectStore(LIB_STORE).put(x));
+  return new Promise((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+}
+async function libAll() {
+  const db = await libOpen();
+  return new Promise((res, rej) => {
+    const rq = db.transaction(LIB_STORE, 'readonly').objectStore(LIB_STORE).getAll();
+    rq.onsuccess = () => res(rq.result || []);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+async function libDel(id) {
+  const db = await libOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(LIB_STORE, 'readwrite');
+    tx.objectStore(LIB_STORE).delete(id);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+async function libFileMeta(blob) {
+  const isPng = /\.png$/i.test(blob.name || '');
+  const meta = { name: '', desc: '', greets: 0 };
+  try {
+    const ab = await blob.arrayBuffer();
+    const j = isPng ? parseCharaPNG(ab) : JSON.parse(new TextDecoder().decode(ab));
+    meta.name = j.name || '';
+    meta.desc = (j.description || '').trim();
+    meta.greets = Array.isArray(j.alternate_greetings) ? j.alternate_greetings.length : 0;
+    if (!meta.name && j.data && j.data.name) meta.name = j.data.name;
+  } catch (e) { meta.desc = '（解析失败：' + e.message + '）'; }
+  return meta;
+}
+async function libAddEntries(files) {
+  const recs = [];
+  for (const f of files) {
+    const nm = f.name || '';
+    if (!/\.(png|json)$/i.test(nm)) continue;
+    const meta = await libFileMeta(f);
+    recs.push({ id: uid(), name: nm, type: /\.png$/i.test(nm) ? 'png' : 'json', blob: f, size: f.size, addedAt: Date.now(), meta });
+  }
+  if (!recs.length) return 0;
+  await libAdd(recs);
+  await renderLib();
+  return recs.length;
+}
+async function renderLib() {
+  const all = await libAll();
+  const list = $('#lib-list');
+  list.innerHTML = '';
+  $('#lib-count').textContent = '共 ' + all.length + ' 张';
+  if (!all.length) { list.innerHTML = '<p class="hint" style="margin-top:6px">库里还没有卡。点「导入角色卡」把 PNG/JSON 角色卡存进来。</p>'; return; }
+  all.sort((a, b) => b.addedAt - a.addedAt);
+  all.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'lib-card';
+    el.innerHTML = '<label class="lib-chk" title="选中以打包导出"><input type="checkbox" class="lib-sel" data-id="' + r.id + '"></label>'
+      + '<div class="lib-thumb">' + (r.type === 'png' ? '<img src="' + URL.createObjectURL(r.blob) + '" alt="">' : '<span>JSON</span>') + '</div>'
+      + '<div class="lib-info"><b>' + esc(r.meta.name || r.name) + '</b><div class="lib-meta">' + r.type.toUpperCase() + ' · ' + (r.size / 1024).toFixed(1) + ' KB · ' + new Date(r.addedAt).toLocaleDateString() + (r.meta.greets ? ' · 开场 ' + r.meta.greets + ' 条' : '') + '</div></div>'
+      + '<div class="lib-ops"><button class="btn small" data-act="view" data-id="' + r.id + '">查看</button><button class="btn small" data-act="dl" data-id="' + r.id + '">下载</button><button class="btn small danger" data-act="del" data-id="' + r.id + '">删除</button></div>';
+    list.appendChild(el);
+  });
+}
+async function libDetail(rec) {
+  const ab = await rec.blob.arrayBuffer();
+  let j = null;
+  try { j = rec.type === 'png' ? parseCharaPNG(ab) : JSON.parse(new TextDecoder().decode(ab)); } catch (e) {}
+  const mask = document.createElement('div');
+  mask.className = 'lib-mask';
+  const desc = (j && (j.description || '')) || rec.meta.desc || '（无 description）';
+  const greets = j && Array.isArray(j.alternate_greetings) ? j.alternate_greetings : [];
+  const mes = j && (j.mes_example || '');
+  let greetsHtml = '';
+  greets.forEach((g, i) => {
+    const cnt = g.replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '').length;
+    greetsHtml += '<details class="lib-greet"><summary>开场白 ' + (i + 1) + '（约 ' + cnt + ' 字）</summary><div class="lib-greet-body">' + esc(g) + '</div></details>';
+  });
+  mask.innerHTML = '<div class="lib-detail">'
+    + '<div class="lib-detail-head"><b>' + esc((j && j.name) || rec.meta.name || rec.name) + '</b>'
+    + '<span style="font-size:12px;color:var(--SmartThemeFGColor)">' + rec.type.toUpperCase() + ' · ' + (rec.size / 1024).toFixed(1) + ' KB</span>'
+    + '<button class="btn small" id="lib-detail-close">关闭</button></div>'
+    + '<div class="lib-detail-body">'
+    + '<div class="lib-sub">description（' + desc.replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '').length + ' 字）</div>'
+    + '<pre>' + esc(desc) + '</pre>'
+    + (mes ? '<div class="lib-sub">mes_example</div><pre>' + esc(mes) + '</pre>' : '')
+    + (greetsHtml || '')
+    + '</div></div>';
+  document.body.appendChild(mask);
+  mask.addEventListener('click', e => { if (e.target === mask || e.target.id === 'lib-detail-close') mask.remove(); });
+}
+function libDownload(rec) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(rec.blob);
+  a.download = rec.name || ('card-' + rec.id + (rec.type === 'png' ? '.png' : '.json'));
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+async function makeZip(entries) {
+  const enc = new TextEncoder();
+  const parts = [], cd = [];
+  let offset = 0, count = 0;
+  for (const e of entries) {
+    const nameB = enc.encode(e.name);
+    const data = new Uint8Array(await e.blob.arrayBuffer());
+    const crc = crc32(data);
+    const lh = new Uint8Array(30);
+    const v = new DataView(lh.buffer);
+    v.setUint32(0, 0x04034b50); v.setUint16(4, 20); v.setUint16(6, 0x0800); v.setUint16(8, 0);
+    const t = new Date();
+    v.setUint16(10, ((t.getFullYear() - 1980) << 9) | ((t.getMonth() + 1) << 5) | t.getDate());
+    v.setUint16(12, (t.getHours() << 11) | (t.getMinutes() << 5) | (t.getSeconds() >> 1));
+    v.setUint32(14, crc); v.setUint32(18, data.length); v.setUint32(22, data.length);
+    v.setUint16(26, nameB.length); v.setUint16(28, 0);
+    parts.push(lh, nameB, data);
+    const ce = new Uint8Array(46);
+    const v2 = new DataView(ce.buffer);
+    v2.setUint32(0, 0x02014b50); v2.setUint16(4, 20); v2.setUint16(6, 20); v2.setUint16(8, 0x0800);
+    v2.setUint16(10, 0); v2.setUint16(12, 0); v2.setUint16(14, 0);
+    v2.setUint32(16, crc);
+    v2.setUint32(20, data.length); v2.setUint32(24, data.length);
+    v2.setUint16(28, nameB.length); v2.setUint16(30, 0); v2.setUint16(32, 0);
+    v2.setUint16(34, 0); v2.setUint16(36, 0); v2.setUint32(38, 0);
+    v2.setUint32(42, offset);
+    cd.push(ce, nameB);
+    offset += 30 + nameB.length + data.length;
+    count++;
+  }
+  const cdOffset = offset;
+  const cdBytes = [];
+  let cdSize = 0;
+  for (const p of cd) { cdBytes.push(p); cdSize += p.length; }
+  const eocd = new Uint8Array(22);
+  const v3 = new DataView(eocd.buffer);
+  v3.setUint32(0, 0x06054b50); v3.setUint16(8, count); v3.setUint16(10, count);
+  v3.setUint32(12, cdSize); v3.setUint32(16, cdOffset); v3.setUint16(20, 0);
+  return new Blob(parts.concat(cdBytes, [eocd]), { type: 'application/zip' });
+}
+async function readZip(buf) {
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= 0; i--) { if (dv.getUint32(i) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new Error('不是有效的 zip 文件');
+  const count = dv.getUint16(eocd + 10);
+  const cdOff = dv.getUint32(eocd + 16);
+  const out = [];
+  let p = cdOff;
+  for (let n = 0; n < count && p + 46 <= buf.byteLength; n++) {
+    if (dv.getUint32(p) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10);
+    const compSize = dv.getUint32(p + 20);
+    const nameLen = dv.getUint16(p + 28);
+    const extraLen = dv.getUint16(p + 30);
+    const commentLen = dv.getUint16(p + 32);
+    const localOff = dv.getUint32(p + 42);
+    const name = new TextDecoder().decode(new Uint8Array(buf, p + 46, nameLen));
+    if (!/\.(png|json)$/i.test(name)) { p += 46 + nameLen + extraLen + commentLen; continue; }
+    const lv = new DataView(buf, localOff, 30);
+    const lNameLen = lv.getUint16(26), lExtraLen = lv.getUint16(28);
+    const dataStart = localOff + 30 + lNameLen + lExtraLen;
+    const dataBytes = new Uint8Array(buf, dataStart, compSize);
+    let data = dataBytes;
+    if (method === 8) {
+      try {
+        const stream = new Blob([dataBytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+        data = new Uint8Array(await new Response(stream).arrayBuffer());
+      } catch (e) { p += 46 + nameLen + extraLen + commentLen; continue; }
+    } else if (method !== 0) { p += 46 + nameLen + extraLen + commentLen; continue; }
+    out.push({ name, blob: new Blob([data], { type: /\.json$/i.test(name) ? 'application/json' : 'image/png' }) });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+async function libExportZip(selected) {
+  const all = await libAll();
+  let recs = all;
+  if (selected) {
+    recs = all.filter(r => selected.indexOf(r.id) !== -1);
+    if (!recs.length) { toast('请先勾选要导出的卡片', 'warn'); return; }
+  }
+  if (!recs.length) { toast('库里没有卡片', 'warn'); return; }
+  const entries = recs.map(r => ({ name: r.name, blob: r.blob }));
+  const zip = await makeZip(entries);
+  const d = new Date();
+  const fn = '人设卡备份-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '.zip';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(zip); a.download = fn;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('已导出 ' + recs.length + ' 张卡为 ' + fn, 'ok');
+}
+$('#btn-lib-import').addEventListener('click', () => $('#lib-file').click());
+$('#btn-lib-importzip').addEventListener('click', () => $('#lib-zip').click());
+$('#btn-lib-export').addEventListener('click', () => libExportZip(null));
+$('#btn-lib-exportsel').addEventListener('click', () => {
+  const sel = Array.from(document.querySelectorAll('.lib-sel:checked')).map(x => x.dataset.id);
+  libExportZip(sel);
+});
+$('#lib-file').addEventListener('change', async e => {
+  if (e.target.files && e.target.files.length) {
+    const n = await libAddEntries(Array.from(e.target.files));
+    toast('已导入 ' + n + ' 张角色卡', n ? 'ok' : 'warn');
+  }
+  e.target.value = '';
+});
+$('#lib-zip').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) { e.target.value = ''; return; }
+  try {
+    const buf = await f.arrayBuffer();
+    const items = await readZip(buf);
+    if (!items.length) { toast('zip 里没有 PNG/JSON 角色卡', 'warn'); }
+    else {
+      const n = await libAddEntries(items);
+      toast('已从 zip 导入 ' + n + ' 张角色卡', 'ok');
+    }
+  } catch (err) { toast('导入 zip 失败：' + err.message, 'err'); }
+  e.target.value = '';
+});
+$('#lib-list').addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const all = await libAll();
+  const rec = all.find(r => String(r.id) === String(id));
+  if (!rec) return;
+  const act = btn.dataset.act;
+  if (act === 'view') libDetail(rec);
+  else if (act === 'dl') libDownload(rec);
+  else if (act === 'del') {
+    if (confirm('确定从库里删除「' + (rec.meta.name || rec.name) + '」？')) {
+      await libDel(rec.id);
+      await renderLib();
+      toast('已删除', 'ok');
+    }
+  }
+});
+
 /* ===== 顶部 tab 切换 ===== */
 $$('#tabs .tab').forEach(t => t.addEventListener('click', () => {
   $$('#tabs .tab').forEach(x => x.classList.toggle('on', x === t));
@@ -2630,6 +2922,7 @@ function init() {
   renderApiSwitch();
   renderRefs();
   $('#in-min').value = State.min;
+  renderLib().catch(() => {});
 }
 init();
 init();
