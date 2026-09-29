@@ -162,6 +162,19 @@ textarea.input{resize:vertical;line-height:1.5}
 .lib-greet .lib-greet-body{max-height:240px;overflow:auto;padding:10px;white-space:pre-wrap}
 .lib-sub{font-size:12px;color:var(--SmartThemeFGColor);margin-top:8px}
 @media (max-width:720px){.lib-card{flex-wrap:wrap}.lib-ops{width:100%;justify-content:flex-start}}
+/* ===== 世界书工厂 ===== */
+#view-wb .row{margin-top:6px}
+#view-wb textarea{width:100%;box-sizing:border-box}
+#view-wb select{max-width:100%}
+.wb-list{border:1px solid var(--SmartThemeFGColor);border-radius:10px;max-height:260px;overflow:auto;margin-top:6px}
+.wb-item{display:flex;gap:8px;align-items:flex-start;padding:7px 10px;border-bottom:1px solid var(--SmartThemeFGColor);font-size:12.5px;line-height:1.5}
+.wb-item:last-child{border-bottom:none}
+.wb-item input[type=checkbox]{margin-top:3px}
+.wb-item .wb-tag{flex:0 0 auto;font-size:10.5px;border:1px solid var(--SmartThemeFGColor);border-radius:4px;padding:0 5px;color:var(--SmartThemeFGColor);margin-left:auto}
+.wb-item .wb-name{font-weight:bold}
+.wb-item .wb-prev{color:var(--SmartThemeFGColor);word-break:break-all}
+.wb-lbl{font-size:12px;color:var(--SmartThemeFGColor);margin-top:8px}
+#wb-gen-out pre,#wb-merge-out pre{white-space:pre-wrap;word-break:break-all;font-size:11.5px;max-height:200px;overflow:auto;background:var(--SmartThemeChatTintColor);border-radius:8px;padding:8px;margin-top:4px}
 </style>
 </head>
 <body>
@@ -172,6 +185,7 @@ textarea.input{resize:vertical;line-height:1.5}
     <button class="tab on" data-view="home">生成人设</button>
     <button class="tab" data-view="wash">洗涤角色卡</button>
     <button class="tab" data-view="lib">人设一览</button>
+    <button class="tab" data-view="wb">世界书工厂</button>
   </div>
   <span class="sp"></span>
   <select id="theme-switch" title="主题（莫兰迪色系）"></select>
@@ -421,6 +435,64 @@ textarea.input{resize:vertical;line-height:1.5}
     <div class="panel">
       <div class="row" style="align-items:center"><b>卡片列表</b><span id="lib-count" style="font-size:12px;color:var(--SmartThemeFGColor)"></span></div>
       <div id="lib-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 视图：世界书工厂（制造 + 缝合） ===== -->
+<div class="view" id="view-wb">
+  <div class="col" id="wb-col">
+    <div class="panel">
+      <h3>世界书工厂 <small style="font-weight:normal;font-size:12px;color:var(--SmartThemeFGColor)">世界书制造 · 预设缝合</small></h3>
+      <p class="hint">两个功能：① 世界书制造——把需求+素材生成符合酒馆格式的世界书（JSON，重要级自动映射）；② 预设缝合——把来源预设/世界书的条目插入目标文件的最佳位置。</p>
+    </div>
+
+    <!-- 制造 -->
+    <div class="panel">
+      <h3>① 世界书制造</h3>
+      <div class="row"><label class="lbl" style="width:120px">世界书标题</label><input id="wb-title" placeholder="如：记忆世界书 / 设定补充"></div>
+      <div class="row"><label class="lbl" style="width:120px">用途/需求</label><input id="wb-req" placeholder="如：生成记忆世界书，把用户总结的过往经历按时间与重要性归档"></div>
+      <div class="row"><label class="lbl" style="width:120px">素材内容</label><textarea id="wb-src" rows="6" placeholder="粘贴你的总结/设定/记忆文本，可多段，一行一段"></textarea></div>
+      <div class="row" style="align-items:flex-start">
+        <label class="lbl" style="width:120px">重要级规则</label>
+        <div style="flex:1">
+          <select id="wb-imp">
+            <option value="auto" selected>自动判断（推荐）——每一条由 AI 按内容判重要级</option>
+            <option value="permanent">全部永久记忆（常驻 constant）</option>
+            <option value="high">全部高优先级</option>
+            <option value="normal">全部常规</option>
+            <option value="low">全部低频（概率触发）</option>
+          </select>
+          <p class="hint" style="margin-top:4px">档位映射：永久=常驻注入 / 高=按关键词高优先 / 常规=按关键词 / 低频=概率触发（酒馆读取时按这些字段生效）。</p>
+        </div>
+      </div>
+      <div class="row"><button class="btn primary" id="wb-gen">生成世界书</button><button class="btn small" id="wb-gen-dl" disabled>下载 JSON</button></div>
+      <div id="wb-gen-out" style="margin-top:6px"></div>
+    </div>
+
+    <!-- 缝合 -->
+    <div class="panel">
+      <h3>② 预设缝合</h3>
+      <div class="row" style="flex-wrap:wrap">
+        <button class="btn small" id="wb-src-btn">导入来源文件（预设/世界书）</button>
+        <button class="btn small" id="wb-dst-btn">导入目标文件（预设/世界书）</button>
+        <input type="file" id="wb-src-file" accept=".json,.png,.webp,application/json,image/png" style="display:none">
+        <input type="file" id="wb-dst-file" accept=".json,.png,.webp,application/json,image/png" style="display:none">
+      </div>
+      <div id="wb-src-box" style="margin-top:6px"></div>
+      <div id="wb-dst-box" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:8px;align-items:flex-start">
+        <label class="lbl" style="width:120px">插入位置</label>
+        <div style="flex:1">
+          <select id="wb-pos">
+            <option value="auto" selected>自动匹配最佳位置（按角色/区域/优先级分组）</option>
+            <option value="manual">手动指定——在目标条目列表中先勾选一个「插入到此条目之后」</option>
+          </select>
+          <p class="hint" style="margin-top:4px">自动：对预设按 role/injection_position/injection_depth 归类插入并同步 prompt_order；对世界书按 order/常驻分组插入。手动：你在下方目标列表勾选目标条目后插入其后。</p>
+        </div>
+      </div>
+      <div class="row"><button class="btn primary" id="wb-merge">执行缝合并生成</button><button class="btn small" id="wb-merge-dl" disabled>下载合并后文件</button></div>
+      <div id="wb-merge-out" style="margin-top:6px"></div>
     </div>
   </div>
 </div>
@@ -2913,6 +2985,275 @@ $('#lib-list').addEventListener('click', async e => {
       toast('已删除', 'ok');
     }
   }
+});
+
+/* ===== 世界书工厂：解析 / 制造 / 缝合 ===== */
+let wbSrc = null, wbDst = null, wbLast = null, wbMerged = null;
+function wbParse(text) {
+  let j;
+  try { j = JSON.parse(text); } catch (e) { throw new Error('JSON 解析失败：' + e.message); }
+  if (Array.isArray(j)) return { kind: 'worldbook', title: '世界书', id: 0, entries: j.map(x => Object.assign({}, x)), entryType: 'array', fromChar: false };
+  if (j.prompts && Array.isArray(j.prompts)) {
+    return { kind: 'preset', raw: j, title: j.name || '预设', prompts: j.prompts.map((p, i) => Object.assign({ __idx: i }, p)), promptOrder: Array.isArray(j.prompt_order) ? j.prompt_order : [] };
+  }
+  if (j.entries) return wbFromEntries(j, false);
+  if (j.data && j.data.character_book && j.data.character_book.entries) return wbFromEntries(j.data.character_book, true);
+  if (j.character_book && j.character_book.entries) return wbFromEntries(j.character_book, true);
+  throw new Error('无法识别文件类型（需要世界书 entries 或预设 prompts）');
+}
+function wbFromEntries(obj, fromChar) {
+  const e = obj.entries;
+  let list, entryType;
+  if (Array.isArray(e)) { entryType = 'array'; list = e.map(x => Object.assign({}, x)); }
+  else { entryType = 'dict'; list = Object.keys(e).map(k => Object.assign({ __dictKey: k }, e[k])); }
+  return { kind: 'worldbook', title: obj.title || (fromChar ? '角色卡世界书' : '世界书'), id: obj.id !== undefined ? obj.id : 0, entries: list, entryType, fromChar };
+}
+function wbEntryName(e) {
+  return (e.key && e.key[0]) || e.comment || e.content ? String(e.content || '').slice(0, 30) : '条目';
+}
+function wbRenderSrc() {
+  const box = $('#wb-src-box');
+  if (!wbSrc) { box.innerHTML = '<p class="hint">来源：未导入</p>'; return; }
+  const list = wbSrc.kind === 'preset' ? wbSrc.prompts : wbSrc.entries;
+  let html = '<div class="wb-lbl">来源：' + esc(wbSrc.title) + '（' + (wbSrc.kind === 'preset' ? '提示词预设' : '世界书') + '，共 ' + list.length + ' 条）——勾选要缝合的条目：</div><div class="wb-list">';
+  list.forEach((it, i) => {
+    const name = wbSrc.kind === 'preset' ? (it.name || it.content || '').slice(0, 24) : wbEntryName(it);
+    const tag = wbSrc.kind === 'preset' ? (it.role || '') + (it.enabled === 'True' || it.enabled === true ? '·开' : '·关') : (it.constant ? '常驻' : (it.selective ? '选择' : ''));
+    html += '<div class="wb-item"><input type="checkbox" class="wb-sel" data-i="' + i + '"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(name) + '</span><div class="wb-prev">' + esc(String(it.content || it.comment || '').slice(0, 90)) + '</div></div><span class="wb-tag">' + esc(tag) + '</span></div>';
+  });
+  box.innerHTML = html + '</div>';
+}
+function wbRenderDst() {
+  const box = $('#wb-dst-box');
+  if (!wbDst) { box.innerHTML = '<p class="hint">目标：未导入</p>'; return; }
+  const list = wbDst.kind === 'preset' ? wbDst.prompts : wbDst.entries;
+  let html = '<div class="wb-lbl">目标：' + esc(wbDst.title) + '（' + (wbDst.kind === 'preset' ? '提示词预设' : '世界书') + '，共 ' + list.length + ' 条）——手动模式时点选「插入到此之后」：</div><div class="wb-list">';
+  list.forEach((it, i) => {
+    const name = wbDst.kind === 'preset' ? (it.name || it.content || '').slice(0, 24) : wbEntryName(it);
+    const tag = wbDst.kind === 'preset' ? (it.role || '') : (it.constant ? '常驻' : (it.selective ? '选择' : ''));
+    html += '<div class="wb-item"><input type="radio" name="wb-dst-radio" class="wb-radio" value="' + i + '"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(name) + '</span><div class="wb-prev">' + esc(String(it.content || it.comment || '').slice(0, 90)) + '</div></div><span class="wb-tag">' + esc(tag) + '</span></div>';
+  });
+  box.innerHTML = html + '</div>';
+}
+function pngCharaText(buf) {
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  let off = 8;
+  while (off + 8 <= u8.length) {
+    const len = dv.getUint32(off);
+    const type = String.fromCharCode(u8[off + 4], u8[off + 5], u8[off + 6], u8[off + 7]);
+    if (type === 'tEXt') {
+      const bytes = new Uint8Array(buf, off + 8, len);
+      const d = new TextDecoder('utf-8').decode(bytes);
+      const eq = d.indexOf('\x00');
+      const key = eq >= 0 ? d.slice(0, eq) : d;
+      if (key === 'chara' || key === 'ccv3' || key === 'ccv2') return eq >= 0 ? d.slice(eq + 1) : '';
+    }
+    off += 12 + len;
+  }
+  return null;
+}
+function wbReadFile(f, cb) {
+  const nm = (f.name || '').toLowerCase();
+  if (nm.endsWith('.png') || nm.endsWith('.webp')) {
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const txt = pngCharaText(rd.result);
+        if (!txt) throw new Error('图片内没有角色卡 JSON（不是酒馆卡）');
+        cb(txt);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    rd.readAsArrayBuffer(f);
+  } else {
+    const rd = new FileReader();
+    rd.onload = () => cb(rd.result);
+    rd.readAsText(f);
+  }
+}
+function wbDownload(fname, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+/* ---- 制造 ---- */
+async function wbGenRun() {
+  const title = $('#wb-title').value.trim() || '世界书';
+  const req = $('#wb-req').value.trim();
+  const src = $('#wb-src').value.trim();
+  const imp = $('#wb-imp').value;
+  if (!src) { toast('请先粘贴素材内容', 'warn'); return; }
+  if (!State.apis.length) { toast('请先在「生成人设」页配置 API', 'warn'); return; }
+  const prompt = '你是酒馆（SillyTavern）世界书生成专家。\n'
+    + '【任务】根据用户素材，生成符合酒馆格式的世界书条目 JSON 数组。\n'
+    + '【用途】' + (req || '通用设定/记忆') + '\n'
+    + '【素材】\n' + src + '\n'
+    + '【规则】\n'
+    + '- 把素材拆成若干逻辑独立的条目，每条聚焦一个主题（一个人物、一段经历、一个设定）。\n'
+    + '- 条目字段：key（触发关键词数组，中英皆可，酒馆按它激活）、keysecondary（次级关键词数组，可空）、comment（一句话注释）、content（条目正文，可含 {{char}}/{{user}} 变量，用词贴近素材）。\n'
+    + '- 内容具体可引用，不写空话。\n'
+    + '- 每条额外给 importance 字段，只允许：永久、高、中、低、随机（按这条对记忆/剧情的重要程度判断）。\n'
+    + '【输出】只输出合法 JSON 数组，形如 [{"key":["a","b"],"keysecondary":[],"comment":"","content":"...","importance":"中"}]，不要任何前后文字、不要 markdown 围栏。';
+  toast('正在生成世界书…', 'ok');
+  let out = '';
+  try { out = await callAPI(State.apis[0], [{ role: 'user', content: prompt }], 8000); } catch (e) { toast('生成失败：' + (e.message || e), 'err'); return; }
+  let items;
+  try { const a = out.indexOf('['), b = out.lastIndexOf(']'); items = JSON.parse(out.slice(a, b + 1)); }
+  catch (e) { toast('返回 JSON 解析失败（可重试或换个模型）', 'err'); return; }
+  if (!Array.isArray(items) || !items.length) { toast('没有生成条目', 'err'); return; }
+  const impMap = {
+    permanent: { constant: true, selective: false, order: 5, probability: 100 },
+    high: { constant: false, selective: true, order: 30, probability: 100 },
+    normal: { constant: false, selective: true, order: 100, probability: 100 },
+    low: { constant: false, selective: true, order: 160, probability: 50 },
+  };
+  const keyToImp = { 永久: 'permanent', 高: 'high', 中: 'normal', 低: 'low', 随机: 'low' };
+  const entries = {};
+  items.forEach((it, i) => {
+    const im = imp === 'auto' ? (keyToImp[String(it.importance || '中').trim()] || 'normal') : imp;
+    const m = impMap[im];
+    entries[String(i)] = {
+      uid: i,
+      key: Array.isArray(it.key) ? it.key : [String(it.key || '')],
+      keysecondary: Array.isArray(it.keysecondary) ? it.keysecondary : (it.keysecondary ? [String(it.keysecondary)] : []),
+      comment: it.comment || '',
+      content: it.content || '',
+      constant: m.constant, selective: m.selective, selectiveLogic: 'AND',
+      addopt: false, order: m.order, probability: m.probability,
+      excludeLoops: false, excludeRecursion: false, displayIndex: i,
+    };
+  });
+  wbLast = { title: title, id: Math.floor(Date.now() / 1000), entries: entries };
+  const json = JSON.stringify(wbLast, null, 2);
+  $('#wb-gen-out').innerHTML = '<div class="wb-lbl">已生成 ' + Object.keys(entries).length + ' 条（重要级已自动映射到 constant/selective/order/probability）</div><pre>' + esc(json) + '</pre>';
+  $('#wb-gen-dl').disabled = false;
+}
+/* ---- 缝合 ---- */
+function wbPresetAutoInsertIdx(prompts, p) {
+  let best = -1;
+  for (let i = prompts.length - 1; i >= 0; i--) {
+    const q = prompts[i];
+    if (String(q.role) === String(p.role) && String(q.injection_position) === String(p.injection_position) && String(q.injection_depth) === String(p.injection_depth)) { best = i; break; }
+  }
+  return best >= 0 ? best + 1 : prompts.length;
+}
+function wbMergeRun() {
+  if (!wbSrc || !wbDst) { toast('请先导入来源与目标文件', 'warn'); return; }
+  if (wbSrc.kind !== wbDst.kind) { toast('来源与目标类型不一致（预设 vs 世界书），无法缝合', 'err'); return; }
+  const mode = $('#wb-pos').value;
+  let sel = [];
+  if (wbSrc.kind === 'preset') {
+    document.querySelectorAll('#wb-src-box .wb-sel:checked').forEach(x => sel.push(Number(x.dataset.i)));
+  } else {
+    document.querySelectorAll('#wb-src-box .wb-sel:checked').forEach(x => sel.push(Number(x.dataset.i)));
+  }
+  if (!sel.length) { toast('请先勾选要缝合的条目', 'warn'); return; }
+  let dstIdx = -1;
+  if (mode === 'manual') {
+    const r = document.querySelector('#wb-dst-box .wb-radio:checked');
+    if (!r) { toast('手动模式：请在目标列表中勾选「插入到此之后」', 'warn'); return; }
+    dstIdx = Number(r.value);
+  }
+  let out;
+  try { out = wbSrc.kind === 'preset' ? wbMergePreset(sel, mode, dstIdx) : wbMergeWorldbook(sel, mode, dstIdx); }
+  catch (e) { toast('缝合失败：' + e.message, 'err'); return; }
+  wbMerged = out;
+  const json = JSON.stringify(out, null, 2);
+  $('#wb-merge-out').innerHTML = '<div class="wb-lbl">已缝合：目标更新后共 ' + (wbSrc.kind === 'preset' ? out.prompts.length : Object.keys(out.entries).length) + ' 条（原 ' + (wbSrc.kind === 'preset' ? wbDst.prompts.length : (wbDst.entryType === 'dict' ? Object.keys(wbDst.entries).length : wbDst.entries.length)) + ' 条）</div><pre>' + esc(json) + '</pre>';
+  $('#wb-merge-dl').disabled = false;
+}
+function wbMergePreset(sel, mode, dstIdx) {
+  const dst = JSON.parse(JSON.stringify(wbDst.raw));
+  const srcSel = sel.map(i => wbSrc.prompts[i]);
+  let cursor = dstIdx + 1;
+  for (const p of srcSel) {
+    const np = Object.assign({}, p);
+    delete np.__idx;
+    if (!np.identifier || dst.prompts.some(q => q.identifier === np.identifier)) np.identifier = uid();
+    let idx, anchorId;
+    if (mode === 'manual') { idx = cursor++; anchorId = dst.prompts[idx - 1].identifier; }
+    else { idx = wbPresetAutoInsertIdx(dst.prompts, np); anchorId = idx > 0 ? dst.prompts[idx - 1].identifier : null; }
+    dst.prompts.splice(idx, 0, np);
+    if (Array.isArray(dst.prompt_order)) {
+      dst.prompt_order.forEach(po => {
+        if (po && Array.isArray(po.order) && !po.order.some(o => o.identifier === np.identifier)) {
+          const oa = anchorId ? po.order.findIndex(o => o.identifier === anchorId) : -1;
+          const ent = { identifier: np.identifier, enabled: np.enabled === 'True' || np.enabled === true };
+          if (oa >= 0) po.order.splice(oa + 1, 0, ent);
+          else po.order.push(ent);
+        }
+      });
+    }
+  }
+  return dst;
+}
+function wbMergeWorldbook(sel, mode, dstIdx) {
+  const dst = { title: wbDst.title, id: wbDst.id };
+  let maxUid = 0;
+  const cur = wbDst.entries.map(x => x);
+  cur.forEach(x => { const u = Number(x.uid); if (!isNaN(u) && u > maxUid) maxUid = u; });
+  const srcSel = sel.map(i => wbSrc.entries[i]);
+  // 排序目标条目（按 order），找插入点
+  const orderOf = x => { const o = Number(x.order); return isNaN(o) ? 100 : o; };
+  const sortedDst = cur.slice().sort((a, b) => orderOf(a) - orderOf(b));
+  const anchor = mode === 'manual' ? cur[dstIdx] : null;
+  const entries = {};
+  if (wbDst.entryType === 'dict') { cur.forEach(x => entries[String(x.__dictKey !== undefined ? x.__dictKey : x.uid)] = x); }
+  else { cur.forEach(x => entries[String(x.uid)] = x); }
+  srcSel.forEach(p => {
+    const np = Object.assign({}, p);
+    delete np.__dictKey;
+    np.uid = ++maxUid;
+    if (mode === 'manual' && anchor) {
+      const aOrder = orderOf(anchor);
+      const after = sortedDst.filter(x => orderOf(x) > aOrder);
+      const bOrder = after.length ? orderOf(after[0]) : (aOrder + 10);
+      np.order = Math.floor((aOrder + bOrder) / 2);
+    } else {
+      // 自动：按常驻/选择分组，插到同组末尾附近
+      const group = sortedDst.filter(x => !!x.constant === !!np.constant);
+      if (group.length) {
+        const lastG = group[group.length - 1];
+        np.order = orderOf(lastG) + 1;
+      } else np.order = orderOf(np);
+    }
+    entries[String(np.uid)] = np;
+  });
+  dst.entries = entries;
+  return dst;
+}
+/* ---- 事件 ---- */
+$('#wb-gen').addEventListener('click', wbGenRun);
+$('#wb-gen-dl').addEventListener('click', () => { if (!wbLast) { toast('还没有生成结果', 'warn'); return; } wbDownload((wbLast.title || '世界书') + '.json', JSON.stringify(wbLast, null, 2)); });
+$('#wb-src-btn').addEventListener('click', () => $('#wb-src-file').click());
+$('#wb-dst-btn').addEventListener('click', () => $('#wb-dst-file').click());
+$('#wb-src-file').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (f) {
+    wbReadFile(f, txt => {
+      try { wbSrc = wbParse(txt); wbRenderSrc(); toast('来源已导入：' + wbSrc.title, 'ok'); }
+      catch (err) { toast(err.message, 'err'); }
+    });
+  }
+  e.target.value = '';
+});
+$('#wb-dst-file').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (f) {
+    wbReadFile(f, txt => {
+      try { wbDst = wbParse(txt); wbRenderDst(); toast('目标已导入：' + wbDst.title, 'ok'); }
+      catch (err) { toast(err.message, 'err'); }
+    });
+  }
+  e.target.value = '';
+});
+$('#wb-merge').addEventListener('click', wbMergeRun);
+$('#wb-merge-dl').addEventListener('click', () => {
+  if (!wbMerged) { toast('还没有缝合结果', 'warn'); return; }
+  const base = (wbDst && (wbDst.title || (wbDst.raw && wbDst.raw.name))) || '缝合结果';
+  wbDownload(base + '-缝合版.json', JSON.stringify(wbMerged, null, 2));
 });
 
 /* ===== 顶部 tab 切换 ===== */
