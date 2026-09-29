@@ -2697,10 +2697,10 @@ async function libFileMeta(blob) {
   try {
     const ab = await blob.arrayBuffer();
     const j = isPng ? parseCharaPNG(ab) : JSON.parse(new TextDecoder().decode(ab));
-    meta.name = j.name || '';
-    meta.desc = (j.description || '').trim();
-    meta.greets = Array.isArray(j.alternate_greetings) ? j.alternate_greetings.length : 0;
-    if (!meta.name && j.data && j.data.name) meta.name = j.data.name;
+    const d = (j && j.data && typeof j.data === 'object') ? j.data : (j || {});
+    meta.name = d.name || '';
+    meta.desc = (d.description || '').trim();
+    meta.greets = Array.isArray(d.alternate_greetings) ? d.alternate_greetings.length : 0;
   } catch (e) { meta.desc = '（解析失败：' + e.message + '）'; }
   return meta;
 }
@@ -2738,18 +2738,19 @@ async function libDetail(rec) {
   const ab = await rec.blob.arrayBuffer();
   let j = null;
   try { j = rec.type === 'png' ? parseCharaPNG(ab) : JSON.parse(new TextDecoder().decode(ab)); } catch (e) {}
+  const d = (j && j.data && typeof j.data === 'object') ? j.data : (j || {});
   const mask = document.createElement('div');
   mask.className = 'lib-mask';
-  const desc = (j && (j.description || '')) || rec.meta.desc || '（无 description）';
-  const greets = j && Array.isArray(j.alternate_greetings) ? j.alternate_greetings : [];
-  const mes = j && (j.mes_example || '');
+  const desc = (d.description || '') || rec.meta.desc || '（无 description）';
+  const greets = Array.isArray(d.alternate_greetings) ? d.alternate_greetings : [];
+  const mes = d.mes_example || '';
   let greetsHtml = '';
   greets.forEach((g, i) => {
     const cnt = g.replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '').length;
     greetsHtml += '<details class="lib-greet"><summary>开场白 ' + (i + 1) + '（约 ' + cnt + ' 字）</summary><div class="lib-greet-body">' + esc(g) + '</div></details>';
   });
   mask.innerHTML = '<div class="lib-detail">'
-    + '<div class="lib-detail-head"><b>' + esc((j && j.name) || rec.meta.name || rec.name) + '</b>'
+    + '<div class="lib-detail-head"><b>' + esc(d.name || rec.meta.name || rec.name) + '</b>'
     + '<span style="font-size:12px;color:var(--SmartThemeFGColor)">' + rec.type.toUpperCase() + ' · ' + (rec.size / 1024).toFixed(1) + ' KB</span>'
     + '<button class="btn small" id="lib-detail-close">关闭</button></div>'
     + '<div class="lib-detail-body">'
