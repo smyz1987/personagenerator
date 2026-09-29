@@ -174,6 +174,11 @@ textarea.input{resize:vertical;line-height:1.5}
 .wb-item .wb-name{font-weight:bold}
 .wb-item .wb-prev{color:var(--SmartThemeFGColor);word-break:break-all}
 .wb-lbl{font-size:12px;color:var(--SmartThemeFGColor);margin-top:8px}
+.wb-item.wb-new{background:rgba(255,200,60,.16);border-left:3px solid #ffc833}
+.wb-newtag{flex:0 0 auto;font-size:10px;background:#ffc833;color:#222;border-radius:4px;padding:1px 5px;margin-left:auto;font-weight:bold}
+.wb-edit{margin-top:6px;width:100%}
+.wb-edit textarea{width:100%;box-sizing:border-box;font-size:12px;font-family:inherit}
+.wb-edit input{width:100%;box-sizing:border-box;font-size:12px;margin-bottom:4px}
 #wb-gen-out pre,#wb-merge-out pre{white-space:pre-wrap;word-break:break-all;font-size:11.5px;max-height:200px;overflow:auto;background:var(--SmartThemeChatTintColor);border-radius:8px;padding:8px;margin-top:4px}
 </style>
 </head>
@@ -3022,7 +3027,7 @@ function wbRenderSrc() {
   list.forEach((it, i) => {
     const name = wbSrc.kind === 'preset' ? (it.name || it.content || '').slice(0, 24) : wbEntryName(it);
     const tag = wbSrc.kind === 'preset' ? (it.role || '') + (it.enabled === 'True' || it.enabled === true ? '·开' : '·关') : (it.constant ? '常驻' : (it.selective ? '选择' : ''));
-    html += '<div class="wb-item"><input type="checkbox" class="wb-sel" data-i="' + i + '"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(name) + '</span><div class="wb-prev">' + esc(String(it.content || it.comment || '').slice(0, 90)) + '</div></div><span class="wb-tag">' + esc(tag) + '</span></div>';
+    html += '<div class="wb-item"><input type="checkbox" class="wb-sel" data-i="' + i + '"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(name) + '</span><div class="wb-prev">' + esc(String(it.content || it.comment || '').slice(0, 90)) + '</div></div><button class="btn small wb-toggle" data-i="' + i + '">展开</button><span class="wb-tag">' + esc(tag) + '</span></div>';
   });
   box.innerHTML = html + '</div>';
 }
@@ -3034,9 +3039,66 @@ function wbRenderDst() {
   list.forEach((it, i) => {
     const name = wbDst.kind === 'preset' ? (it.name || it.content || '').slice(0, 24) : wbEntryName(it);
     const tag = wbDst.kind === 'preset' ? (it.role || '') : (it.constant ? '常驻' : (it.selective ? '选择' : ''));
-    html += '<div class="wb-item"><input type="radio" name="wb-dst-radio" class="wb-radio" value="' + i + '"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(name) + '</span><div class="wb-prev">' + esc(String(it.content || it.comment || '').slice(0, 90)) + '</div></div><span class="wb-tag">' + esc(tag) + '</span></div>';
+    html += '<div class="wb-item"><input type="radio" name="wb-dst-radio" class="wb-radio" value="' + i + '"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(name) + '</span><div class="wb-prev">' + esc(String(it.content || it.comment || '').slice(0, 90)) + '</div></div><button class="btn small wb-toggle" data-i="' + i + '">展开</button><span class="wb-tag">' + esc(tag) + '</span></div>';
   });
   box.innerHTML = html + '</div>';
+}
+function wbAiRewrite(p) {
+  if (!State.apis.length) { toast('请先在「生成人设」页配置 API', 'warn'); return; }
+  const dstName = wbDst ? (wbDst.title || (wbDst.raw && wbDst.raw.name) || '目标预设') : '目标预设';
+  const sample = wbDst && wbDst.kind === 'preset'
+    ? wbDst.prompts.slice(0, 3).map(q => (q.name || '') + '：' + String(q.content || '').slice(0, 150)).join('\n')
+    : '（未导入目标预设，按通用酒馆条目风格改写）';
+  const prompt = '你是酒馆预设/世界书条目改写专家。\n'
+    + '【任务】把下面的条目内容改写成与目标预设风格一致，让它在插入后自然融入。\n'
+    + '【目标预设】' + dstName + '\n'
+    + '【目标预设样例条目】\n' + sample + '\n'
+    + '【来源条目】\n' + String(p.content || '') + '\n'
+    + '【规则】保留所有 {{变量}} 与条目的核心功能、触发词含义不变；句式、语气、结构贴合目标预设风格；只输出改写后的内容文本，不要任何前后文字。';
+  toast('AI 改写中…', 'ok');
+  callAPI(State.apis[0], [{ role: 'user', content: prompt }], 4000).then(out => {
+    p.content = String(out || '').trim();
+    wbRenderSrc();
+    toast('改写完成，已存回条目（可再点「展开」查看）', 'ok');
+  }).catch(e => toast('改写失败：' + (e.message || e), 'err'));
+}
+function wbAttachEdit(box, isDst) {
+  box.addEventListener('click', e => {
+    const t = e.target;
+    if (t.classList.contains('wb-toggle')) {
+      const item = t.closest('.wb-item');
+      const old = item.querySelector('.wb-edit');
+      if (old) { old.remove(); return; }
+      const i = Number(t.dataset.i);
+      const p = isDst ? (wbDst.kind === 'preset' ? wbDst.prompts[i] : wbDst.entries[i]) : (wbSrc.kind === 'preset' ? wbSrc.prompts[i] : wbSrc.entries[i]);
+      const isWb = (isDst ? wbDst.kind : wbSrc.kind) !== 'preset';
+      let h = '<div class="wb-edit">';
+      if (isWb) h += '<input class="wb-key" placeholder="触发词，逗号分隔" value="' + esc((p.key || []).join(', ')) + '">';
+      h += '<textarea class="wb-ed" rows="5">' + esc(p.content || p.comment || '') + '</textarea><div class="row"><button class="btn small wb-save">保存</button>';
+      if (!isDst) h += '<button class="btn small wb-ai">AI 改写（匹配目标）</button>';
+      h += '</div></div>';
+      item.insertAdjacentHTML('beforeend', h);
+      return;
+    }
+    if (t.classList.contains('wb-save')) {
+      const item = t.closest('.wb-item');
+      const i = Number(item.querySelector('.wb-toggle').dataset.i);
+      const p = isDst ? (wbDst.kind === 'preset' ? wbDst.prompts[i] : wbDst.entries[i]) : (wbSrc.kind === 'preset' ? wbSrc.prompts[i] : wbSrc.entries[i]);
+      const edit = item.querySelector('.wb-edit');
+      p.content = edit.querySelector('.wb-ed').value;
+      if (edit.querySelector('.wb-key')) {
+        const kv = edit.querySelector('.wb-key').value.split(',').map(x => x.trim()).filter(Boolean);
+        if (kv.length) p.key = kv;
+      }
+      toast('已保存，缝合时会用修改后的内容', 'ok');
+      return;
+    }
+    if (t.classList.contains('wb-ai')) {
+      const item = t.closest('.wb-item');
+      const i = Number(item.querySelector('.wb-toggle').dataset.i);
+      wbAiRewrite(wbSrc.kind === 'preset' ? wbSrc.prompts[i] : wbSrc.entries[i]);
+    }
+  });
 }
 function pngCharaText(buf) {
   const u8 = new Uint8Array(buf);
@@ -3223,18 +3285,32 @@ function wbMergeRun() {
   const pl = wbPlan();
   if (!pl) return;
   const mode = pl.mode, sel = pl.sel, dstIdx = pl.dstIdx;
-  let out;
-  try { out = wbSrc.kind === 'preset' ? wbMergePreset(sel, mode, dstIdx) : wbMergeWorldbook(sel, mode, dstIdx); }
+  let res;
+  try { res = wbSrc.kind === 'preset' ? wbMergePreset(sel, mode, dstIdx) : wbMergeWorldbook(sel, mode, dstIdx); }
   catch (e) { toast('缝合失败：' + e.message, 'err'); return; }
+  const out = res.out;
   wbMerged = out;
+  const added = res.added;
   const json = JSON.stringify(out, null, 2);
-  $('#wb-merge-out').innerHTML = '<div class="wb-lbl">已缝合：目标更新后共 ' + (wbSrc.kind === 'preset' ? out.prompts.length : Object.keys(out.entries).length) + ' 条（原 ' + (wbSrc.kind === 'preset' ? wbDst.prompts.length : (wbDst.entryType === 'dict' ? Object.keys(wbDst.entries).length : wbDst.entries.length)) + ' 条）</div><pre>' + esc(json) + '</pre>';
+  let html = '<div class="wb-lbl">缝合完成：共 ' + (wbSrc.kind === 'preset' ? out.prompts.length : Object.keys(out.entries).length) + ' 条（原 ' + (wbSrc.kind === 'preset' ? wbDst.prompts.length : (wbDst.entryType === 'dict' ? Object.keys(wbDst.entries).length : wbDst.entries.length)) + ' 条 + 新增 ' + added.length + ' 条），高亮为本次新插入：</div><div class="wb-list">';
+  const list = wbSrc.kind === 'preset' ? out.prompts : Object.keys(out.entries).map(k => out.entries[k]);
+  list.forEach(it => {
+    const isNew = wbSrc.kind === 'preset' ? added.indexOf(it.identifier) >= 0 : added.indexOf(it.uid) >= 0;
+    const name = wbSrc.kind === 'preset' ? (it.name || '条目') : wbEntryName(it);
+    const tag = wbSrc.kind === 'preset' ? (it.role || '') + (it.enabled === 'True' || it.enabled === true ? '·开' : '·关') : (it.constant ? '常驻' : (it.selective ? '选择' : ''));
+    html += '<div class="wb-item' + (isNew ? ' wb-new' : '') + '"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(name) + '</span><div class="wb-prev">' + esc(String(it.content || it.comment || '').slice(0, 120)) + '</div></div>' + (isNew ? '<span class="wb-newtag">新插入</span>' : '') + '<span class="wb-tag">' + esc(tag) + '</span></div>';
+  });
+  html += '</div><div class="row" style="margin-top:6px"><button class="btn small" id="wb-detail">查看完整 JSON</button></div><div id="wb-json-box" style="display:none"><pre>' + esc(json) + '</pre></div>';
+  $('#wb-merge-out').innerHTML = html;
+  $('#wb-detail').addEventListener('click', () => { const b = $('#wb-json-box'); b.style.display = b.style.display === 'none' ? '' : 'none'; });
   $('#wb-merge-dl').disabled = false; $('#wb-merge-clr').disabled = false;
   $('#wb-preview-box').innerHTML = '';
 }
 function wbMergePreset(sel, mode, dstIdx) {
   const dst = JSON.parse(JSON.stringify(wbDst.raw));
+  dst.prompts = wbDst.prompts.map(x => { const q = Object.assign({}, x); delete q.__idx; return q; });
   const srcSel = sel.map(i => wbSrc.prompts[i]);
+  const added = [];
   let cursor = dstIdx + 1;
   for (const p of srcSel) {
     const np = Object.assign({}, p);
@@ -3244,6 +3320,7 @@ function wbMergePreset(sel, mode, dstIdx) {
     if (mode === 'manual') { idx = cursor++; anchorId = dst.prompts[idx - 1].identifier; }
     else { idx = wbPresetAutoInsertIdx(dst.prompts, np); anchorId = idx > 0 ? dst.prompts[idx - 1].identifier : null; }
     dst.prompts.splice(idx, 0, np);
+    added.push(np.identifier);
     if (Array.isArray(dst.prompt_order)) {
       dst.prompt_order.forEach(po => {
         if (po && Array.isArray(po.order) && !po.order.some(o => o.identifier === np.identifier)) {
@@ -3255,7 +3332,7 @@ function wbMergePreset(sel, mode, dstIdx) {
       });
     }
   }
-  return dst;
+  return { out: dst, added: added };
 }
 function wbMergeWorldbook(sel, mode, dstIdx) {
   const dst = { title: wbDst.title, id: wbDst.id };
@@ -3290,7 +3367,7 @@ function wbMergeWorldbook(sel, mode, dstIdx) {
     entries[String(np.uid)] = np;
   });
   dst.entries = entries;
-  return dst;
+  return { out: dst, added: srcSel.map(x => x.uid) };
 }
 /* ---- 事件 ---- */
 function wbClearGen() {
@@ -3307,6 +3384,8 @@ $('#wb-gen').addEventListener('click', wbGenRun);
 $('#wb-gen-dl').addEventListener('click', () => { if (!wbLast) { toast('还没有生成结果', 'warn'); return; } wbDownload((wbLast.title || '世界书') + '.json', JSON.stringify(wbLast, null, 2)); });
 $('#wb-src-btn').addEventListener('click', () => $('#wb-src-file').click());
 $('#wb-dst-btn').addEventListener('click', () => $('#wb-dst-file').click());
+wbAttachEdit($('#wb-src-box'), false);
+wbAttachEdit($('#wb-dst-box'), true);
 $('#wb-src-file').addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (f) {
