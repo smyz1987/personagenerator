@@ -466,7 +466,7 @@ textarea.input{resize:vertical;line-height:1.5}
           <p class="hint" style="margin-top:4px">档位映射：永久=常驻注入 / 高=按关键词高优先 / 常规=按关键词 / 低频=概率触发（酒馆读取时按这些字段生效）。</p>
         </div>
       </div>
-      <div class="row"><button class="btn primary" id="wb-gen">生成世界书</button><button class="btn small" id="wb-gen-dl" disabled>下载 JSON</button></div>
+      <div class="row"><button class="btn primary" id="wb-gen">生成世界书</button><button class="btn small" id="wb-gen-dl" disabled>下载 JSON</button><button class="btn small" id="wb-gen-clr" disabled>清空</button></div>
       <div id="wb-gen-out" style="margin-top:6px"></div>
     </div>
 
@@ -475,7 +475,9 @@ textarea.input{resize:vertical;line-height:1.5}
       <h3>② 预设缝合</h3>
       <div class="row" style="flex-wrap:wrap">
         <button class="btn small" id="wb-src-btn">导入来源文件（预设/世界书）</button>
+        <button class="btn small" id="wb-src-clr" disabled>移除来源</button>
         <button class="btn small" id="wb-dst-btn">导入目标文件（预设/世界书）</button>
+        <button class="btn small" id="wb-dst-clr" disabled>移除目标</button>
         <input type="file" id="wb-src-file" accept=".json,.png,.webp,application/json,image/png" style="display:none">
         <input type="file" id="wb-dst-file" accept=".json,.png,.webp,application/json,image/png" style="display:none">
       </div>
@@ -491,7 +493,7 @@ textarea.input{resize:vertical;line-height:1.5}
           <p class="hint" style="margin-top:4px">自动：对预设按 role/injection_position/injection_depth 归类插入并同步 prompt_order；对世界书按 order/常驻分组插入。手动：你在下方目标列表勾选目标条目后插入其后。</p>
         </div>
       </div>
-      <div class="row"><button class="btn primary" id="wb-merge">执行缝合并生成</button><button class="btn small" id="wb-merge-dl" disabled>下载合并后文件</button></div>
+      <div class="row"><button class="btn primary" id="wb-merge">执行缝合并生成</button><button class="btn small" id="wb-merge-dl" disabled>下载合并后文件</button><button class="btn small" id="wb-merge-clr" disabled>清空</button></div>
       <div id="wb-merge-out" style="margin-top:6px"></div>
     </div>
   </div>
@@ -3128,7 +3130,7 @@ async function wbGenRun() {
   wbLast = { title: title, id: Math.floor(Date.now() / 1000), entries: entries };
   const json = JSON.stringify(wbLast, null, 2);
   $('#wb-gen-out').innerHTML = '<div class="wb-lbl">已生成 ' + Object.keys(entries).length + ' 条（重要级已自动映射到 constant/selective/order/probability）</div><pre>' + esc(json) + '</pre>';
-  $('#wb-gen-dl').disabled = false;
+  $('#wb-gen-dl').disabled = false; $('#wb-gen-clr').disabled = false;
 }
 /* ---- 缝合 ---- */
 function wbPresetAutoInsertIdx(prompts, p) {
@@ -3162,7 +3164,7 @@ function wbMergeRun() {
   wbMerged = out;
   const json = JSON.stringify(out, null, 2);
   $('#wb-merge-out').innerHTML = '<div class="wb-lbl">已缝合：目标更新后共 ' + (wbSrc.kind === 'preset' ? out.prompts.length : Object.keys(out.entries).length) + ' 条（原 ' + (wbSrc.kind === 'preset' ? wbDst.prompts.length : (wbDst.entryType === 'dict' ? Object.keys(wbDst.entries).length : wbDst.entries.length)) + ' 条）</div><pre>' + esc(json) + '</pre>';
-  $('#wb-merge-dl').disabled = false;
+  $('#wb-merge-dl').disabled = false; $('#wb-merge-clr').disabled = false;
 }
 function wbMergePreset(sel, mode, dstIdx) {
   const dst = JSON.parse(JSON.stringify(wbDst.raw));
@@ -3225,6 +3227,16 @@ function wbMergeWorldbook(sel, mode, dstIdx) {
   return dst;
 }
 /* ---- 事件 ---- */
+function wbClearGen() {
+  $('#wb-title').value = ''; $('#wb-req').value = ''; $('#wb-src').value = '';
+  wbLast = null; $('#wb-gen-out').innerHTML = ''; $('#wb-gen-dl').disabled = true; $('#wb-gen-clr').disabled = true;
+}
+function wbClearMerge() {
+  wbSrc = null; wbDst = null; wbMerged = null;
+  $('#wb-src-box').innerHTML = ''; $('#wb-dst-box').innerHTML = ''; $('#wb-merge-out').innerHTML = '';
+  $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true;
+  $('#wb-src-clr').disabled = true; $('#wb-dst-clr').disabled = true;
+}
 $('#wb-gen').addEventListener('click', wbGenRun);
 $('#wb-gen-dl').addEventListener('click', () => { if (!wbLast) { toast('还没有生成结果', 'warn'); return; } wbDownload((wbLast.title || '世界书') + '.json', JSON.stringify(wbLast, null, 2)); });
 $('#wb-src-btn').addEventListener('click', () => $('#wb-src-file').click());
@@ -3233,7 +3245,7 @@ $('#wb-src-file').addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (f) {
     wbReadFile(f, txt => {
-      try { wbSrc = wbParse(txt); wbRenderSrc(); toast('来源已导入：' + wbSrc.title, 'ok'); }
+      try { wbSrc = wbParse(txt); wbRenderSrc(); $('#wb-src-clr').disabled = false; toast('来源已导入：' + wbSrc.title, 'ok'); }
       catch (err) { toast(err.message, 'err'); }
     });
   }
@@ -3243,12 +3255,16 @@ $('#wb-dst-file').addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (f) {
     wbReadFile(f, txt => {
-      try { wbDst = wbParse(txt); wbRenderDst(); toast('目标已导入：' + wbDst.title, 'ok'); }
+      try { wbDst = wbParse(txt); wbRenderDst(); $('#wb-dst-clr').disabled = false; toast('目标已导入：' + wbDst.title, 'ok'); }
       catch (err) { toast(err.message, 'err'); }
     });
   }
   e.target.value = '';
 });
+$('#wb-gen-clr').addEventListener('click', wbClearGen);
+$('#wb-merge-clr').addEventListener('click', wbClearMerge);
+$('#wb-src-clr').addEventListener('click', () => { wbSrc = null; wbMerged = null; $('#wb-src-box').innerHTML = ''; $('#wb-merge-out').innerHTML = ''; $('#wb-src-clr').disabled = true; $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true; });
+$('#wb-dst-clr').addEventListener('click', () => { wbDst = null; wbMerged = null; $('#wb-dst-box').innerHTML = ''; $('#wb-merge-out').innerHTML = ''; $('#wb-dst-clr').disabled = true; $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true; });
 $('#wb-merge').addEventListener('click', wbMergeRun);
 $('#wb-merge-dl').addEventListener('click', () => {
   if (!wbMerged) { toast('还没有缝合结果', 'warn'); return; }
