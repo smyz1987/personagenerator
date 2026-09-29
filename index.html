@@ -493,7 +493,8 @@ textarea.input{resize:vertical;line-height:1.5}
           <p class="hint" style="margin-top:4px">自动：对预设按 role/injection_position/injection_depth 归类插入并同步 prompt_order；对世界书按 order/常驻分组插入。手动：你在下方目标列表勾选目标条目后插入其后。</p>
         </div>
       </div>
-      <div class="row"><button class="btn primary" id="wb-merge">执行缝合并生成</button><button class="btn small" id="wb-merge-dl" disabled>下载合并后文件</button><button class="btn small" id="wb-merge-clr" disabled>清空</button></div>
+      <div class="row"><button class="btn primary" id="wb-merge">预览并确认缝合</button><button class="btn small" id="wb-merge-dl" disabled>下载合并后文件</button><button class="btn small" id="wb-merge-clr" disabled>清空</button></div>
+      <div id="wb-preview-box" style="margin-top:6px"></div>
       <div id="wb-merge-out" style="margin-top:6px"></div>
     </div>
   </div>
@@ -3141,23 +3142,87 @@ function wbPresetAutoInsertIdx(prompts, p) {
   }
   return best >= 0 ? best + 1 : prompts.length;
 }
-function wbMergeRun() {
-  if (!wbSrc || !wbDst) { toast('请先导入来源与目标文件', 'warn'); return; }
-  if (wbSrc.kind !== wbDst.kind) { toast('来源与目标类型不一致（预设 vs 世界书），无法缝合', 'err'); return; }
+function wbPlan() {
+  if (!wbSrc || !wbDst) { toast('请先导入来源与目标文件', 'warn'); return null; }
+  if (wbSrc.kind !== wbDst.kind) { toast('来源与目标类型不一致（预设 vs 世界书），无法缝合', 'err'); return null; }
   const mode = $('#wb-pos').value;
   let sel = [];
-  if (wbSrc.kind === 'preset') {
-    document.querySelectorAll('#wb-src-box .wb-sel:checked').forEach(x => sel.push(Number(x.dataset.i)));
-  } else {
-    document.querySelectorAll('#wb-src-box .wb-sel:checked').forEach(x => sel.push(Number(x.dataset.i)));
-  }
-  if (!sel.length) { toast('请先勾选要缝合的条目', 'warn'); return; }
+  document.querySelectorAll('#wb-src-box .wb-sel:checked').forEach(x => sel.push(Number(x.dataset.i)));
+  if (!sel.length) { toast('请先勾选要缝合的条目', 'warn'); return null; }
   let dstIdx = -1;
   if (mode === 'manual') {
     const r = document.querySelector('#wb-dst-box .wb-radio:checked');
-    if (!r) { toast('手动模式：请在目标列表中勾选「插入到此之后」', 'warn'); return; }
+    if (!r) { toast('手动模式：请在目标列表中勾选「插入到此之后」', 'warn'); return null; }
     dstIdx = Number(r.value);
   }
+  const plan = [];
+  if (wbSrc.kind === 'preset') {
+    const sim = wbDst.prompts.slice();
+    let cursor = dstIdx + 1;
+    sel.forEach(i => {
+      const p = wbSrc.prompts[i];
+      let idx, anchor;
+      if (mode === 'manual') { idx = cursor++; anchor = sim[idx - 1]; }
+      else { idx = wbPresetAutoInsertIdx(sim, p); anchor = idx > 0 ? sim[idx - 1] : null; }
+      const nm = (p.name || String(p.content || '').slice(0, 24) || '条目');
+      const an = anchor ? (anchor.name || String(anchor.content || '').slice(0, 24) || '条目') : null;
+      let to, why;
+      if (mode === 'manual') {
+        to = an ? '插入到「' + an + '」之后' : '插入到文件开头';
+        why = '按你手动指定的位置';
+      } else if (an) {
+        to = '插入到「' + an + '」之后';
+        why = '与「' + an + '」同属 role=' + p.role + ' / 注入区域 ' + p.injection_position + ' / 深度 ' + p.injection_depth + ' 组，同类条目放在一起，酒馆按区域顺序注入时保持一致';
+      } else {
+        to = '插入到文件末尾';
+        why = '目标中没有与它同 role/区域/深度的条目，放末尾不打断现有分组';
+      }
+      plan.push({ from: nm, to: to, why: why });
+      sim.splice(idx, 0, p);
+    });
+  } else {
+    const cur = wbDst.entries.map(x => x);
+    const orderOf = x => { const o = Number(x.order); return isNaN(o) ? 100 : o; };
+    const sorted = cur.slice().sort((a, b) => orderOf(a) - orderOf(b));
+    const anchor = mode === 'manual' ? cur[dstIdx] : null;
+    sel.forEach(i => {
+      const p = wbSrc.entries[i];
+      const grp = p.constant ? '常驻' : '选择性';
+      let to, why;
+      if (mode === 'manual' && anchor) {
+        to = '「' + wbEntryName(anchor) + '」之后';
+        why = '按你手动指定的位置';
+      } else {
+        const g = sorted.filter(x => !!x.constant === !!p.constant);
+        if (g.length) {
+          to = '同组（' + grp + '）末尾';
+          why = '目标中已有 ' + grp + ' 条目（如「' + wbEntryName(g[g.length - 1]) + '」），放同组末尾保持重要级分组连续，酒馆按 order 排序注入';
+        } else {
+          to = '新分组（' + grp + '）';
+          why = '目标中没有 ' + grp + ' 条目，新建该重要级分组';
+        }
+      }
+      plan.push({ from: wbEntryName(p), to: to, why: why });
+    });
+  }
+  return { sel: sel, mode: mode, dstIdx: dstIdx, plan: plan };
+}
+function wbMergePreview() {
+  const pl = wbPlan();
+  if (!pl) return;
+  const total = wbSrc.kind === 'preset' ? wbDst.prompts.length : wbDst.entries.length;
+  let html = '<div class="wb-lbl">插入计划（共 ' + pl.plan.length + ' 条，目标将从 ' + total + ' 条变为 ' + (total + pl.plan.length) + ' 条）：</div><div class="wb-list">';
+  pl.plan.forEach(x => {
+    html += '<div class="wb-item"><div style="flex:1;min-width:0"><span class="wb-name">' + esc(x.from) + '</span><div class="wb-prev">' + esc(x.to) + '</div><div class="wb-why" style="font-size:11px;color:var(--SmartThemeFGColor);margin-top:2px">为什么：' + esc(x.why) + '</div></div></div>';
+  });
+  html += '</div><div class="row" style="margin-top:6px"><button class="btn primary" id="wb-merge-confirm">确认生成</button></div>';
+  $('#wb-preview-box').innerHTML = html;
+  $('#wb-merge-confirm').addEventListener('click', wbMergeRun);
+}
+function wbMergeRun() {
+  const pl = wbPlan();
+  if (!pl) return;
+  const mode = pl.mode, sel = pl.sel, dstIdx = pl.dstIdx;
   let out;
   try { out = wbSrc.kind === 'preset' ? wbMergePreset(sel, mode, dstIdx) : wbMergeWorldbook(sel, mode, dstIdx); }
   catch (e) { toast('缝合失败：' + e.message, 'err'); return; }
@@ -3165,6 +3230,7 @@ function wbMergeRun() {
   const json = JSON.stringify(out, null, 2);
   $('#wb-merge-out').innerHTML = '<div class="wb-lbl">已缝合：目标更新后共 ' + (wbSrc.kind === 'preset' ? out.prompts.length : Object.keys(out.entries).length) + ' 条（原 ' + (wbSrc.kind === 'preset' ? wbDst.prompts.length : (wbDst.entryType === 'dict' ? Object.keys(wbDst.entries).length : wbDst.entries.length)) + ' 条）</div><pre>' + esc(json) + '</pre>';
   $('#wb-merge-dl').disabled = false; $('#wb-merge-clr').disabled = false;
+  $('#wb-preview-box').innerHTML = '';
 }
 function wbMergePreset(sel, mode, dstIdx) {
   const dst = JSON.parse(JSON.stringify(wbDst.raw));
@@ -3233,7 +3299,7 @@ function wbClearGen() {
 }
 function wbClearMerge() {
   wbSrc = null; wbDst = null; wbMerged = null;
-  $('#wb-src-box').innerHTML = ''; $('#wb-dst-box').innerHTML = ''; $('#wb-merge-out').innerHTML = '';
+  $('#wb-src-box').innerHTML = ''; $('#wb-dst-box').innerHTML = ''; $('#wb-preview-box').innerHTML = ''; $('#wb-merge-out').innerHTML = '';
   $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true;
   $('#wb-src-clr').disabled = true; $('#wb-dst-clr').disabled = true;
 }
@@ -3263,9 +3329,9 @@ $('#wb-dst-file').addEventListener('change', e => {
 });
 $('#wb-gen-clr').addEventListener('click', wbClearGen);
 $('#wb-merge-clr').addEventListener('click', wbClearMerge);
-$('#wb-src-clr').addEventListener('click', () => { wbSrc = null; wbMerged = null; $('#wb-src-box').innerHTML = ''; $('#wb-merge-out').innerHTML = ''; $('#wb-src-clr').disabled = true; $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true; });
-$('#wb-dst-clr').addEventListener('click', () => { wbDst = null; wbMerged = null; $('#wb-dst-box').innerHTML = ''; $('#wb-merge-out').innerHTML = ''; $('#wb-dst-clr').disabled = true; $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true; });
-$('#wb-merge').addEventListener('click', wbMergeRun);
+$('#wb-src-clr').addEventListener('click', () => { wbSrc = null; wbMerged = null; $('#wb-src-box').innerHTML = ''; $('#wb-preview-box').innerHTML = ''; $('#wb-merge-out').innerHTML = ''; $('#wb-src-clr').disabled = true; $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true; });
+$('#wb-dst-clr').addEventListener('click', () => { wbDst = null; wbMerged = null; $('#wb-dst-box').innerHTML = ''; $('#wb-preview-box').innerHTML = ''; $('#wb-merge-out').innerHTML = ''; $('#wb-dst-clr').disabled = true; $('#wb-merge-dl').disabled = true; $('#wb-merge-clr').disabled = true; });
+$('#wb-merge').addEventListener('click', wbMergePreview);
 $('#wb-merge-dl').addEventListener('click', () => {
   if (!wbMerged) { toast('还没有缝合结果', 'warn'); return; }
   const base = (wbDst && (wbDst.title || (wbDst.raw && wbDst.raw.name))) || '缝合结果';
