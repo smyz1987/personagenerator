@@ -223,7 +223,9 @@ textarea.input{resize:vertical;line-height:1.5}
       </div>
       <div class="field"><label>职业 / 身份</label><input class="input" id="in-occupation" placeholder="如 电竞选手 / 医学生"></div>
       <div class="field"><label>性格关键词</label><input class="input" id="in-traits" placeholder="如 外冷内热、嘴硬、占有欲强"></div>
-      <div class="field"><label>背景设定（可选，自由写）</label><textarea class="input" id="in-bg" style="min-height:80px" placeholder="例如：从小在福利院长大，靠打比赛改变命运，暗恋青梅竹马多年……"></textarea></div>
+      <div class="field"><label>背景设定（可选，自由写）</label>
+        <div class="row" style="margin:4px 0;flex-wrap:wrap"><button class="btn small" id="bg-import">导入经历素材 Word / txt</button><input type="file" id="bg-import-file" accept=".docx,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" style="display:none"><span class="hint" style="margin-left:8px">导入的是<strong>原始经历文档</strong>（未概括也可以）：生成时会由 AI 提炼加工成背景故事、性格成因等字段，<strong>不会照抄原文</strong></span></div>
+        <textarea class="input" id="in-bg" style="min-height:80px" placeholder="例如：从小在福利院长大，靠打比赛改变命运，暗恋青梅竹马多年……"></textarea></div>
       <div class="field"><label>额外要求（可选）</label><textarea class="input" id="in-extra" style="min-height:50px" placeholder="例如：台词要有标志性口头禅；设定偏轻松喜剧向；禁止黑化……"></textarea></div>
       <div class="field"><label>床上人设（可选，亲密关系向）</label><input class="input" id="in-bed" placeholder="如 敏感易哭型、体力好、主动撩人型、被动羞涩型"></div>
     </div>
@@ -1325,13 +1327,31 @@ function buildPrompt() {
   lines.push(tpl);
   lines.push('');
   lines.push('【关键信息】');
+  const bgIsMaterial = !!i.bg && String(i.bg).trim().startsWith(BG_MARK);
   const keys = [
     ['名字', i.name], ['年龄', i.age], ['性别', i.sex], ['职业/身份', i.occupation], ['性格关键词', i.traits],
-    ['外貌/体型', i.body], ['亲密关系人设', i.bed], ['背景设定', i.bg], ['额外要求', i.extra],
+    ['外貌/体型', i.body], ['亲密关系人设', i.bed],
+    ...(bgIsMaterial ? [] : [['背景设定', i.bg]]),
+    ['额外要求', i.extra],
   ];
   const filled = keys.filter(([, v]) => v).map(([k, v]) => '  ' + k + '：' + v);
   if (filled.length) lines.push(filled.join('\n'));
   else lines.push('  （用户未填具体信息，请发挥创意设定一个完整立体的人物）');
+  if (bgIsMaterial) {
+    const raw = String(i.bg).replace(new RegExp('^' + BG_MARK.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*'), '').trim();
+    if (raw) {
+      lines.push('');
+      lines.push('【经历素材（原始记录，未概括）】');
+      lines.push('以下是从用户导入的经历文档原文，篇幅长、未经概括。必须加工提炼，而不是照抄：');
+      lines.push('- 提炼时间线上的关键事件（童年/少年/青年转折、重要相遇、创伤、身份变化），重组后写入 background_story 的童年/少年/青年、social_status、identity 等字段');
+      lines.push('- 从经历中归纳性格成因、说话习惯与生活细节，融入 personality / speech_style / lifestyle_behaviors / emotional_behaviors');
+      lines.push('- 精简概括原文，禁止整段照抄；素材中明确写出的名字、关系、事件经过不得歪曲或丢失');
+      lines.push('- 素材未提到的部分，按【细节补充规则】正常补充，不得与素材矛盾');
+      lines.push('<<<');
+      lines.push(raw);
+      lines.push('>>>');
+    }
+  }
   if (i.bed) {
     lines.push('');
     lines.push('【NSFW 写作规则】人设涉及亲密关系维度时保持含蓄克制、点到为止：不写露骨细节、不堆砌直白动作与器官描写，用暗示与氛围呈现。');
@@ -3548,6 +3568,89 @@ $('#wb-merge-dl').addEventListener('click', () => {
   if (!wbMerged) { toast('还没有缝合结果', 'warn'); return; }
   const base = (wbDst && (wbDst.title || (wbDst.raw && wbDst.raw.name))) || '缝合结果';
   wbDownload(base + '-缝合版.json', JSON.stringify(wbMerged, null, 2));
+});
+
+/* ===== 背景设定：导入经历 Word/txt ===== */
+function docxUnescape(x) {
+  return String(x || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+function docxText(xml) {
+  let out = '';
+  const ps = String(xml || '').split('</w:p>');
+  for (const p of ps) {
+    const ts = p.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || [];
+    let line = '';
+    ts.forEach(t => { line += docxUnescape(t.replace(/<w:t[^>]*>/, '').replace(/<\/w:t>/, '')); });
+    out += line + '\n';
+  }
+  return out.trim();
+}
+async function bgReadDocx(buf) {
+  if (!window.DecompressionStream) throw new Error('当前浏览器不支持解压 docx，请改用 .txt 导入');
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= 0; i--) {
+    if (u8[i] === 0x50 && u8[i + 1] === 0x4b && u8[i + 2] === 0x05 && u8[i + 3] === 0x06) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('不是有效的 docx（zip）文件');
+  const cdCount = dv.getUint16(eocd + 10, true);
+  const cdOff = dv.getUint32(eocd + 16, true);
+  let target = null;
+  let off = cdOff;
+  for (let n = 0; n < cdCount; n++) {
+    if (off + 46 > u8.length) break;
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const method = dv.getUint16(off + 10, true);
+    const compSize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const commentLen = dv.getUint16(off + 32, true);
+    const localOff = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(off + 46, off + 46 + nameLen));
+    if (name === 'word/document.xml') {
+      const lo = localOff;
+      const lNameLen = dv.getUint16(lo + 26, true);
+      const lExtraLen = dv.getUint16(lo + 28, true);
+      const dataStart = lo + 30 + lNameLen + lExtraLen;
+      target = { method: method, compSize: compSize, dataStart: dataStart };
+      break;
+    }
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  if (!target) throw new Error('docx 里没有正文（word/document.xml）');
+  const comp = u8.subarray(target.dataStart, target.dataStart + target.compSize);
+  if (target.method === 0) return new TextDecoder().decode(comp);
+  const ds = new DecompressionStream('deflate-raw');
+  const stream = new Blob([comp]).stream().pipeThrough(ds);
+  return await new Response(stream).text();
+}
+const BG_MARK = '【经历素材·原始记录】';
+function bgAppend(txt) {
+  const ta = $('#in-bg');
+  if (!ta.value.trim()) ta.value = BG_MARK + '\n' + txt;
+  else if (ta.value.trim().startsWith(BG_MARK)) ta.value = ta.value.trim() + '\n' + txt;
+  else ta.value = ta.value.trim() + '\n\n' + BG_MARK + '\n' + txt;
+  toast('已导入 ' + txt.length + ' 字经历素材（生成时会提炼加工，不会照抄原文）', 'ok');
+}
+$('#bg-import').addEventListener('click', () => $('#bg-import-file').click());
+$('#bg-import-file').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const nm = (f.name || '').toLowerCase();
+  if (nm.endsWith('.txt')) {
+    const rd = new FileReader();
+    rd.onload = () => bgAppend(rd.result || '');
+    rd.readAsText(f);
+  } else {
+    const rd = new FileReader();
+    rd.onload = async () => {
+      try { bgAppend(docxText(await bgReadDocx(rd.result))); }
+      catch (err) { toast(err.message || 'docx 读取失败（老版 .doc 不支持，请另存为 .docx 或用 .txt）', 'err'); }
+    };
+    rd.readAsArrayBuffer(f);
+  }
+  e.target.value = '';
 });
 
 /* ===== 顶部 tab 切换 ===== */
